@@ -1,0 +1,87 @@
+name: Build custom Caddy image
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+    inputs:
+      check_update:
+        description: "Check for and apply Caddy version updates before building"
+        type: boolean
+        default: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  check-and-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for latest Caddy version
+        if: github.event_name == 'schedule' || inputs.check_update
+        id: check
+        run: |
+          CURRENT=$(grep -oP 'FROM caddy:\K[0-9]+\.[0-9]+\.[0-9]+' Dockerfile | head -1)
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+
+          LATEST=$(curl -s "https://hub.docker.com/v2/repositories/library/caddy/tags?page_size=100&ordering=last_updated" | \
+            jq -r '.results[].name' | grep -E '^2\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+
+          if [ "$CURRENT" = "$LATEST" ]; then
+            echo "Caddy is up to date ($CURRENT)"
+          else
+            echo "Update available: $CURRENT -> $LATEST"
+            echo "update=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update Dockerfile
+        if: steps.check.outputs.update == 'true'
+        run: |
+          sed -i "s/caddy:${{ steps.check.outputs.current }}/caddy:${{ steps.check.outputs.latest }}/g" Dockerfile
+
+      - name: Commit and push
+        if: steps.check.outputs.update == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Dockerfile
+          git commit -m "Update Caddy from ${{ steps.check.outputs.current }} to ${{ steps.check.outputs.latest }}"
+          git push
+
+      - name: Log in to GHCR
+        if: github.event_name != 'schedule' || steps.check.outputs.update == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        if: github.event_name != 'schedule' || steps.check.outputs.update == 'true'
+        uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=2
+            type=raw,value=latest
+
+      - name: Build and push image
+        if: github.event_name != 'schedule' || steps.check.outputs.update == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
