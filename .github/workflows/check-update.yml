@@ -88,6 +88,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          sbom: true
+          provenance: mode=max
 
       - name: Attest build provenance
         if: github.event_name != 'schedule' || steps.check.outputs.update == 'true'
