@@ -3,6 +3,7 @@ Custom Caddy image for ACME DNS-01 challenges, built with [xcaddy](https://githu
 ## Modules
 
 - [caddy-dns/cloudflare](https://github.com/caddy-dns/cloudflare)
+- [caddy-dns/hetzner](https://github.com/caddy-dns/hetzner)
 
 ## Automation
 
